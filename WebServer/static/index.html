@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Power Consumption</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+        }
+
+        h2 {
+            margin: 0;
+        }
+
+        #headerContainer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 90%;
+            max-width: 1400px;
+            margin: 20px 0;
+        }
+
+        #switchContainer {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #switchLabel {
+            font-size: 16px;
+            color: #333;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #4caf50;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        #chartContainer {
+            width: 90%;
+            max-width: 1400px;
+            flex-grow: 1;
+            display: flex;
+            padding: 20px;
+            box-sizing: border-box;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.1);
+        }
+
+        #container{
+            width: 90%;
+            height: 90%;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            align-self: center;
+            align-items: center;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        @media (max-width: 600px) {
+            #chartContainer {
+                width: 95%;
+                padding: 10px;
+            }
+            #headerContainer {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="headerContainer">
+            <h2>Power SCADA System</h2>
+            <div id="switchContainer">
+                <span id="switchLabel">Lamp</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggleSwitch">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+        <div id="chartContainer">
+            <canvas id="myChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('myChart').getContext('2d');
+        const toggleSwitch = document.getElementById('toggleSwitch');
+
+        const colors = [
+            'rgba(75, 192, 192, 1)',   // System
+            'rgba(255, 99, 132, 1)',   // Lamp
+            'rgba(255, 206, 86, 1)'    // Phone Charger
+        ];
+
+        const deviceLabels = ['System', 'Lamp', 'Phone Charger'];
+
+        const myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: deviceLabels[0], data: [], borderColor: colors[0], borderWidth: 2, fill: false, tension: 0.2 },
+                    { label: deviceLabels[1], data: [], borderColor: colors[1], borderWidth: 2, fill: false, tension: 0.2 },
+                    { label: deviceLabels[2], data: [], borderColor: colors[2], borderWidth: 2, fill: false, tension: 0.2 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: { title: { display: true, text: 'Time (seconds)' } },
+                    y: { title: { display: true, text: 'Watts' } }
+                },
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            // Title callback: time label
+                            title: function(tooltipItems) {
+                                const time = tooltipItems[0].label;
+                                return `${time} seconds`;
+                            },
+                            // Label callback: device name + value + units
+                            label: function(context) {
+                                const label = context.dataset.label || '';
+                                const value = context.parsed.y !== null ? context.parsed.y.toFixed(2) : 'N/A';
+                                return `${label}: ${value} watts`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        async function updateChart() {
+            try {
+                const response = await fetch('data.csv?t=' + new Date().getTime());
+                const text = await response.text();
+
+                const rows = text.trim().split('\n');
+                const labels = [];
+                const deviceData = [[], [], []];
+
+                rows.forEach((row, index) => {
+                    if(index === 0 && row.toLowerCase().includes('device')) return;
+                    const [device, time, value] = row.split(',');
+                    const devNum = parseInt(device);
+                    if (!labels.includes(time)) labels.push(time);
+                    deviceData[devNum].push({ time, value: parseFloat(value) });
+                });
+
+                myChart.data.labels = labels;
+
+                for (let i = 0; i < 3; i++) {
+                    myChart.data.datasets[i].data = labels.map(t => {
+                        const point = deviceData[i].find(d => d.time === t);
+                        return point ? point.value : null;
+                    });
+                }
+
+                myChart.update();
+            } catch (error) {
+                console.error('Error fetching CSV:', error);
+            }
+        }
+
+        updateChart();
+        setInterval(updateChart, 2000);
+
+        toggleSwitch.addEventListener('change', async () => {
+            const state = toggleSwitch.checked ? '1' : '0';
+            console.log('Lamp switch is', state);
+
+            try {
+                const res = await fetch(`http://192.168.1.13:8000/led?state=${state}`);
+                const txt = await res.text();
+                console.log(txt);
+            } catch (err) {
+                console.error('Fetch error:', err);
+            }
+        });
+    </script>
+</body>
+</html>
